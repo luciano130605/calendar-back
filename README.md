@@ -22,5 +22,5 @@ Las fechas que ya tenías guardadas en el navegador se suben a tu cuenta la prim
 El plan gratis de Render se duerme tras 15 min sin uso: la primera carga después puede tardar ~50 s.
 
 ## API
-- `POST /api/register` · `POST /api/login` → `{ token, username }`
+- `POST /api/register` · `POST /api/login` → `{ token, email }` (body: `{ email, password }`)
 - `GET /api/events` · `PUT /api/events` (reemplaza la lista completa) — requieren `Authorization: Bearer <token>`

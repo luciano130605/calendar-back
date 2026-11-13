@@ -15,7 +15,7 @@ if (!MONGODB_URI || !JWT_SECRET) {
 
 /* ---------- Modelos ---------- */
 const User = mongoose.model('User', new mongoose.Schema({
-  username: { type: String, required: true, unique: true, lowercase: true, trim: true, minlength: 3, maxlength: 30 },
+  email: { type: String, required: true, unique: true, lowercase: true, trim: true, maxlength: 254 },
   hash: { type: String, required: true },
 }, { timestamps: true }));
 
@@ -65,8 +65,11 @@ function limpiar(e) {
 const app = express();
 app.set('trust proxy', 1);
 app.use(express.json({ limit: '2mb' }));
-const origins = CORS_ORIGIN.split(',').map(s => s.trim()).filter(Boolean);
-app.use(cors({ origin: origins.length ? origins : false }));
+// Se ignoran espacios, mayúsculas y barras finales: "https://mi-app.vercel.app/" == "https://mi-app.vercel.app"
+const norm = s => String(s || '').trim().replace(/\/+$/, '').toLowerCase();
+const origins = CORS_ORIGIN.split(',').map(norm).filter(Boolean);
+console.log('CORS permitido para:', origins.length ? origins.join(', ') : '(ninguno: definí CORS_ORIGIN)');
+app.use(cors({ origin: (origin, cb) => cb(null, !origin || origins.includes(norm(origin))) }));
 
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false,
   message: { error: 'Demasiados intentos. Probá de nuevo en unos minutos.' } });
@@ -80,33 +83,34 @@ function auth(req, res, next) {
   catch { res.status(401).json({ error: 'Sesión vencida. Iniciá sesión de nuevo.' }); }
 }
 
+const RE_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const datosAuth = body => {
-  const username = String((body && body.username) || '').trim().toLowerCase();
+  const email = String((body && body.email) || '').trim().toLowerCase();
   const password = String((body && body.password) || '');
-  if (!/^[a-z0-9._-]{3,30}$/.test(username)) return { error: 'El usuario debe tener entre 3 y 30 caracteres (letras, números, . _ -).' };
+  if (email.length > 254 || !RE_EMAIL.test(email)) return { error: 'Ingresá un email válido.' };
   if (password.length < 6 || password.length > 100) return { error: 'La contraseña debe tener al menos 6 caracteres.' };
-  return { username, password };
+  return { email, password };
 };
 
 app.post('/api/register', authLimiter, async (req, res) => {
   const d = datosAuth(req.body);
   if (d.error) return res.status(400).json({ error: d.error });
   try {
-    const user = await User.create({ username: d.username, hash: await bcrypt.hash(d.password, 10) });
-    res.status(201).json({ token: firmar(user), username: user.username });
+    const user = await User.create({ email: d.email, hash: await bcrypt.hash(d.password, 10) });
+    res.status(201).json({ token: firmar(user), email: user.email });
   } catch (e) {
-    if (e.code === 11000) return res.status(409).json({ error: 'Ese usuario ya existe.' });
+    if (e.code === 11000) return res.status(409).json({ error: 'Ya existe una cuenta con ese email.' });
     console.error(e); res.status(500).json({ error: 'Error del servidor.' });
   }
 });
 
 app.post('/api/login', authLimiter, async (req, res) => {
   const d = datosAuth(req.body);
-  const user = !d.error && await User.findOne({ username: d.username });
-  // Mismo mensaje para usuario inexistente y contraseña incorrecta.
+  const user = !d.error && await User.findOne({ email: d.email });
+  // Mismo mensaje para email inexistente y contraseña incorrecta.
   if (!user || !(await bcrypt.compare(d.password, user.hash)))
-    return res.status(401).json({ error: 'Usuario o contraseña incorrectos.' });
-  res.json({ token: firmar(user), username: user.username });
+    return res.status(401).json({ error: 'Email o contraseña incorrectos.' });
+  res.json({ token: firmar(user), email: user.email });
 });
 
 app.get('/api/events', auth, async (req, res) => {
